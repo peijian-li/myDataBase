@@ -1,0 +1,88 @@
+package execution;
+
+import common.Database;
+import common.DbException;
+import common.TransactionAbortedException;
+import common.Type;
+import storage.IntField;
+import storage.Tuple;
+import storage.TupleDesc;
+import transaction.TransactionId;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Iterator;
+
+public class Insert extends Operator{
+    private static final long serialVersionUID = 1L;
+
+    private TransactionId transactionId;
+    private OpIterator child;
+    private int tableId;
+    private ArrayList<Tuple> tupleList ;
+    private Iterator<Tuple> iterator;
+
+    public Insert(TransactionId transactionId, OpIterator child, int tableId) throws DbException {
+        this.transactionId = transactionId;
+        this.child =child;
+        this.tableId = tableId;
+        tupleList=new ArrayList<>();
+        if(!child.getTupleDesc().equals(Database.getCatalog().getTupleDesc(tableId))){
+            throw new DbException("insert tupleDesc not equal.");
+        }
+    }
+
+    public void open() throws DbException, TransactionAbortedException {
+        child.open();
+        int count = 0;
+        while(child.hasNext()){
+            Tuple next = child.next();
+            count++;
+            try {
+                Database.getBufferPool().insertTuple(transactionId,tableId,next);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        Tuple tuple = new Tuple(getTupleDesc());
+        tuple.setField(0, new IntField(count));
+        tupleList.add(tuple);
+        iterator = tupleList.iterator();
+        super.open();
+    }
+
+    public void close() {
+        child.close();
+        iterator = null;
+        super.close();
+    }
+
+    @Override
+    public void rewind() throws DbException, TransactionAbortedException {
+        child.rewind();
+        iterator = tupleList.iterator();
+    }
+
+    @Override
+    protected Tuple fetchNext() throws DbException, TransactionAbortedException {
+        if(iterator != null && iterator.hasNext()){
+            return iterator.next();
+        }
+        return null;
+    }
+
+    @Override
+    public OpIterator[] getChildren() {
+        return new OpIterator[]{child};
+    }
+
+    @Override
+    public void setChildren(OpIterator[] children) {
+        this.child=children[0];
+    }
+
+    @Override
+    public TupleDesc getTupleDesc() {
+        return new TupleDesc(new Type[]{Type.INT_TYPE});
+    }
+}
