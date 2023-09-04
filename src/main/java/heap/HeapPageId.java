@@ -1,11 +1,12 @@
-package storage;
+package heap;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import storage.PageId;
 
 @Data
 @AllArgsConstructor
-public class HeapPageId implements PageId{
+public class HeapPageId implements PageId {
 
     private int tableId;
     private int pageNumber;

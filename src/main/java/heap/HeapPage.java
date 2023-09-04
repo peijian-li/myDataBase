@@ -1,7 +1,8 @@
-package storage;
+package heap;
 
 import common.Database;
 import common.DbException;
+import storage.*;
 import transaction.TransactionId;
 
 import java.io.*;
@@ -10,7 +11,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
 
-public class HeapPage implements Page{
+public class HeapPage implements Page {
 
     private final HeapPageId pid;
     private final TupleDesc td;
@@ -77,7 +78,7 @@ public class HeapPage implements Page{
      * @throws DbException
      */
     public void deleteTuple(Tuple t) throws DbException {
-        int tupleNumber = t.getRecordId().getTupleNo();
+        int tupleNumber = t.getRecordId().getTupleNumber();
         if(isSlotUsed(tupleNumber) && tuples[tupleNumber].equals(t) ){
             tuples[tupleNumber] = null;
             markSlotUsed(tupleNumber,false);

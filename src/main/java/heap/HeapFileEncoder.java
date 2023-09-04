@@ -1,4 +1,4 @@
-package storage;
+package heap;
 
 import common.Type;
 import common.Utility;

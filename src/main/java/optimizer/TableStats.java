@@ -2,6 +2,7 @@ package optimizer;
 
 import common.*;
 import execution.Predicate;
+import heap.HeapFile;
 import lombok.Getter;
 import storage.*;
 import transaction.TransactionId;

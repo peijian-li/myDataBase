@@ -21,9 +21,9 @@ public class Project extends Operator {
         this.child = child;
         outFieldIds = fieldList;
         String[] fieldAr = new String[fieldList.size()];
-        TupleDesc childtd = child.getTupleDesc();
+        TupleDesc childTupleDesc = child.getTupleDesc();
         for (int i = 0; i < fieldAr.length; i++) {
-            fieldAr[i] = childtd.getFieldName(fieldList.get(i));
+            fieldAr[i] = childTupleDesc.getFieldName(fieldList.get(i));
         }
         td = new TupleDesc(typesList.toArray(new Type[]{}), fieldAr);
     }

@@ -54,7 +54,7 @@ public class LogicalPlan {
         Iterator<LogicalScanNode> tableIt = tables.iterator();
         Map<String,TableStats> statsMap = new HashMap<>();//key:表名 value:表数据统计
         Map<String,Double> selectivityMap = new HashMap<>();//key:表名 value:表选择性
-        Map<String,String> equivMap = new HashMap<>();//key: value:
+        Map<String,String> equivMap = new HashMap<>();//key:旧表名 value:join的新表名
 
         //遍历表集合
         while (tableIt.hasNext()) {
@@ -109,29 +109,31 @@ public class LogicalPlan {
 
         //join优化
         JoinOptimizer jo = new JoinOptimizer(this,joins);
+        //计算最优join顺序
         joins = jo.orderJoins(statsMap,selectivityMap,explain);
         for (LogicalJoinNode lj : joins) {
+            boolean isSubQueryJoin = lj instanceof LogicalSubPlanJoinNode;
+            //获取表名
+            String t1name, t2name;
+            if (equivMap.get(lj.t1Alias) != null) {
+                t1name = equivMap.get(lj.t1Alias);
+            } else {
+                t1name = lj.t1Alias;
+            }
+            if (equivMap.get(lj.t2Alias) != null) {
+                t2name = equivMap.get(lj.t2Alias);
+            } else {
+                t2name = lj.t2Alias;
+            }
+
+            //获取表迭代器
             OpIterator plan1;
             OpIterator plan2;
-            boolean isSubQueryJoin = lj instanceof LogicalSubplanJoinNode;
-            String t1name, t2name;
-
-            if (equivMap.get(lj.t1Alias) != null)
-                t1name = equivMap.get(lj.t1Alias);
-            else
-                t1name = lj.t1Alias;
-
-            if (equivMap.get(lj.t2Alias) != null)
-                t2name = equivMap.get(lj.t2Alias);
-            else
-                t2name = lj.t2Alias;
-
             plan1 = tableIteratorMap.get(t1name);
-
             if (isSubQueryJoin) {
-                plan2 = ((LogicalSubplanJoinNode) lj).subPlan;
+                plan2 = ((LogicalSubPlanJoinNode) lj).subPlan;
                 if (plan2 == null)
-                    throw new ParseException("Invalid subquery.");
+                    throw new ParseException("Invalid subQuery.");
             } else {
                 plan2 = tableIteratorMap.get(t2name);
             }
@@ -141,10 +143,12 @@ public class LogicalPlan {
             if (plan2 == null)
                 throw new ParseException("Unknown table in WHERE clause " + lj.t2Alias);
 
+            //join形成新表并更新迭代器
             OpIterator j;
             j = JoinOptimizer.instantiateJoin(lj, plan1, plan2);
             tableIteratorMap.put(t1name, j);
 
+            //更新表映射
             if (!isSubQueryJoin) {
                 tableIteratorMap.remove(t2name);
                 equivMap.put(t2name, t1name);
@@ -154,22 +158,21 @@ public class LogicalPlan {
                         s.setValue(t1name);
                     }
                 }
-
             }
-
         }
 
         if (tableIteratorMap.size() > 1) {
             throw new ParseException("Query does not include join expressions joining all nodes!");
         }
 
-        //
+        //生成结果集
         OpIterator node = tableIteratorMap.entrySet().iterator().next().getValue();
         List<Integer> outFields = new ArrayList<>();
         List<Type> outTypes = new ArrayList<>();
         for (int i = 0; i < selectList.size(); i++) {
             LogicalSelectListNode si = selectList.get(i);
             if (si.aggregateOperator != null) {
+                //该字段为聚合字段
                 outFields.add(groupByField!=null?1:0);
                 TupleDesc tupleDesc = node.getTupleDesc();
                 try {
@@ -177,9 +180,9 @@ public class LogicalPlan {
                 } catch (NoSuchElementException e) {
                     throw new ParseException("Unknown field " +  si.fieldName + " in SELECT list");
                 }
-                outTypes.add(Type.INT_TYPE);  //the type of all aggregate functions is INT
-
+                outTypes.add(Type.INT_TYPE);
             } else if (hasAggregate) {
+                //该字段为分组字段
                 if (groupByField == null) {
                     throw new ParseException("Field " + si.fieldName + " does not appear in GROUP BY list");
                 }
@@ -193,12 +196,14 @@ public class LogicalPlan {
                 }
                 outTypes.add(tupleDesc.getFieldType(id));
             } else if (si.fieldName.equals("null.*")) {
+                //无聚合字段 select *
                 TupleDesc tupleDesc = node.getTupleDesc();
                 for ( i = 0; i < tupleDesc.numFields(); i++) {
                     outFields.add(i);
                     outTypes.add(tupleDesc.getFieldType(i));
                 }
-            } else  {
+            } else {
+                //无聚合字段 select fieldName
                 TupleDesc tupleDesc = node.getTupleDesc();
                 int id;
                 try {
@@ -208,27 +213,25 @@ public class LogicalPlan {
                 }
                 outFields.add(id);
                 outTypes.add(tupleDesc.getFieldType(id));
-
             }
         }
 
 
-        //
+        //聚合操作
         if (hasAggregate) {
             TupleDesc tupleDesc = node.getTupleDesc();
-            Aggregate aggNode;
+            Aggregate aggregateNode;
             try {
-                aggNode = new Aggregate(node,
-                        tupleDesc.fieldNameToIndex(aggregateField),
-                        groupByField == null? Aggregator.NO_GROUPING:tupleDesc.fieldNameToIndex(groupByField),
+                aggregateNode = new Aggregate(node,
+                        tupleDesc.fieldNameToIndex(aggregateField), groupByField == null? Aggregator.NO_GROUPING:tupleDesc.fieldNameToIndex(groupByField),
                         getAggOp(aggregateOperator));
             } catch (NoSuchElementException | IllegalArgumentException e) {
                 throw new ParseException(e);
             }
-            node = aggNode;
+            node = aggregateNode;
         }
 
-        //
+        //分组操作
         if (hasOrderBy) {
             node = new OrderBy(node.getTupleDesc().fieldNameToIndex(oderByField), oderByAscent, node);
         }
@@ -295,7 +298,7 @@ public class LogicalPlan {
         joinField1 = disambiguateName(joinField1);
         String table1 = joinField1.split("[.]")[0];
         String pureField = joinField1.split("[.]")[1];
-        LogicalSubplanJoinNode lj = new LogicalSubplanJoinNode(table1,pureField, joinField2, pred);
+        LogicalSubPlanJoinNode lj = new LogicalSubPlanJoinNode(table1,pureField, joinField2, pred);
         System.out.println("Added subQuery join on " + joinField1);
         joins.add(lj);
     }
@@ -329,7 +332,7 @@ public class LogicalPlan {
         this.aggregateOperator = aggregateOperator;
         this.aggregateField = aggregateField;
         this.groupByField = groupByField;
-        hasAggregate = true;
+        this.hasAggregate = true;
     }
 
     public void addOrderBy(String field, boolean asc) throws ParseException {

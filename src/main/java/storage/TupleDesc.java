@@ -118,7 +118,6 @@ public class TupleDesc implements Serializable{
 
 
     public static TupleDesc merge(TupleDesc td1, TupleDesc td2) {
-        // some code goes here
         List<TDItem> tupleDescList01 = td1.tupleDescList;
         List<TDItem> tupleDescList02 = td2.tupleDescList;
         List<TDItem> res = new ArrayList<>(tupleDescList01);

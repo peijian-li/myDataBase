@@ -2,7 +2,6 @@ package execution;
 
 import common.Type;
 import storage.Field;
-import storage.HeapPage;
 import storage.Tuple;
 
 import java.util.ArrayList;

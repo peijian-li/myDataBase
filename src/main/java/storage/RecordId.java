@@ -10,13 +10,13 @@ public class RecordId {
     private static final long serialVersionUID = 1L;
 
     private PageId pageId;
-    private Integer tupleNo;
+    private Integer tupleNumber;
 
     @Override
     public boolean equals(Object o) {
         if(o instanceof RecordId){
             RecordId temp = (RecordId) o;
-            if(temp.tupleNo.equals(this.tupleNo) && temp.pageId.equals(this.pageId)){
+            if(temp.tupleNumber.equals(this.tupleNumber) && temp.pageId.equals(this.pageId)){
                 return true;
             }
         }
@@ -25,7 +25,7 @@ public class RecordId {
 
     @Override
     public int hashCode() {
-        return (tupleNo+"").hashCode() + (pageId+"").hashCode();
+        return (tupleNumber+"").hashCode() + (pageId+"").hashCode();
 
     }
 
@@ -33,7 +33,7 @@ public class RecordId {
     public String toString() {
         return "RecordId{" +
                 "pageId=" + pageId +
-                ", tupleno=" + tupleNo +
+                ", tupleno=" + tupleNumber +
                 '}';
     }
 }

@@ -17,105 +17,130 @@ import java.util.*;
 @Slf4j
 public class LogFile {
 
-    final File logFile;
-    private RandomAccessFile raf;
-    Boolean recoveryUndecided;
+    private final File logFile;
+    private RandomAccessFile randomAccessFile;
+    private Boolean recoveryUndecided;
 
-    static final int ABORT_RECORD = 1;
-    static final int COMMIT_RECORD = 2;
-    static final int UPDATE_RECORD = 3;
-    static final int BEGIN_RECORD = 4;
-    static final int CHECKPOINT_RECORD = 5;
-    static final long NO_CHECKPOINT_ID = -1;
+    private static final int ABORT_RECORD = 1;
+    private static final int COMMIT_RECORD = 2;
+    private static final int UPDATE_RECORD = 3;
+    private static final int BEGIN_RECORD = 4;
+    private static final int CHECKPOINT_RECORD = 5;
+    private static final long NO_CHECKPOINT_ID = -1;
 
-    final static int INT_SIZE = 4;
-    final static int LONG_SIZE = 8;
+    private static final int INT_SIZE = 4;
+    private static final int LONG_SIZE = 8;
 
-    long currentOffset = -1;
-    int totalRecords = 0;
+    private long currentOffset = -1;
+    private int totalRecords = 0;
 
-    final Map<Long,Long> tidToFirstLogRecord = new HashMap<>();
+    private final Map<Long,Long> tidToFirstLogRecord = new HashMap<>();//key:事务id value:事务开始日志位置
 
     public LogFile(File file) throws IOException {
         this.logFile = file;
-        raf = new RandomAccessFile(file, "rw");
-        recoveryUndecided = true;
+        randomAccessFile = new RandomAccessFile(file, "rw");
+        recoveryUndecided = true;//true:不需要恢复数据库 false:需要
     }
 
-    public synchronized  void logTractionBegin(TransactionId tid) throws IOException {
+    /**
+     * 记录事务开启
+     * @param tid
+     * @throws IOException
+     */
+    public synchronized void logTractionBegin(TransactionId tid) throws IOException {
         log.info("BEGIN");
         if(tidToFirstLogRecord.get(tid.getId()) != null){
-            System.err.print("logTractionBegin: already began this tid\n");
+            log.error("logTractionBegin: already began this tid\n");
             throw new IOException("double logTractionBegin()");
         }
         preAppend();
-        raf.writeInt(BEGIN_RECORD);
-        raf.writeLong(tid.getId());
-        raf.writeLong(currentOffset);
+        randomAccessFile.writeInt(BEGIN_RECORD);
+        randomAccessFile.writeLong(tid.getId());
+        randomAccessFile.writeLong(currentOffset);
         tidToFirstLogRecord.put(tid.getId(), currentOffset);
-        currentOffset = raf.getFilePointer();
+        currentOffset = randomAccessFile.getFilePointer();
         log.info("BEGIN OFFSET = " + currentOffset);
     }
 
+    /**
+     * 记录事务回滚
+     * @param tid
+     * @throws IOException
+     */
     public void logAbort(TransactionId tid) throws IOException {
         synchronized (Database.getBufferPool()) {
             synchronized(this) {
                 preAppend();
                 rollback(tid);
-                raf.writeInt(ABORT_RECORD);
-                raf.writeLong(tid.getId());
-                raf.writeLong(currentOffset);
-                currentOffset = raf.getFilePointer();
+                randomAccessFile.writeInt(ABORT_RECORD);
+                randomAccessFile.writeLong(tid.getId());
+                randomAccessFile.writeLong(currentOffset);
+                currentOffset = randomAccessFile.getFilePointer();
                 force();
                 tidToFirstLogRecord.remove(tid.getId());
             }
         }
     }
 
+    /**
+     * 添加日志前预操作
+     * @throws IOException
+     */
     private void preAppend() throws IOException {
         totalRecords++;
         if(recoveryUndecided){
+            //不需要恢复数据库时清空日志文件
             recoveryUndecided = false;
-            raf.seek(0);
-            raf.setLength(0);
-            raf.writeLong(NO_CHECKPOINT_ID);
-            raf.seek(raf.length());
-            currentOffset = raf.getFilePointer();
+            randomAccessFile.seek(0);
+            randomAccessFile.setLength(0);
+            randomAccessFile.writeLong(NO_CHECKPOINT_ID);
+            randomAccessFile.seek(randomAccessFile.length());
+            currentOffset = randomAccessFile.getFilePointer();
         }
     }
 
+    public synchronized int getTotalRecords() {
+        return totalRecords;
+    }
+
+    /**
+     * 回滚事务
+     * @param tid
+     * @throws NoSuchElementException
+     * @throws IOException
+     */
     private void rollback(TransactionId tid) throws NoSuchElementException, IOException {
         synchronized (Database.getBufferPool()) {
             synchronized(this) {
-                // some code goes here
                 preAppend();
                 long tidId = tid.getId();
                 Long begin = tidToFirstLogRecord.get(tidId);
-                raf.seek(begin);
+                randomAccessFile.seek(begin);
                 while(true){
                     try{
-                        int type = raf.readInt();
-                        Long curTid = raf.readLong();
+                        int type = randomAccessFile.readInt();
+                        Long curTid = randomAccessFile.readLong();
                         if(curTid!=tidId){
                             //如果不是当前的tid，就直接跳过
                             if(type==3){
-                                //update record 还要跳过页数据
-                                readPageData(raf);
-                                readPageData(raf);
+                                //如果是update record 还要跳过页数据
+                                readPageData(randomAccessFile);
+                                readPageData(randomAccessFile);
                             }
                         }else{
+                            //不是update record，直接跳过
                             if(type==3){
-                                //只需要恢复到最初的状态就行
-                                Page before = readPageData(raf);
-                                Page after = readPageData(raf);
+                                //写入旧页
+                                Page before = readPageData(randomAccessFile);
+                                Page after = readPageData(randomAccessFile);
                                 DbFile databaseFile = Database.getCatalog().getDatabaseFile(before.getId().getTableId());
                                 databaseFile.writePage(before);
                                 Database.getBufferPool().discardPage(after.getId());
-                                raf.seek(raf.getFilePointer()+8);
+                                randomAccessFile.seek(randomAccessFile.getFilePointer()+8);
                                 break;
                             }
                         }
-                        raf.seek(raf.getFilePointer()+8);
+                        randomAccessFile.seek(randomAccessFile.getFilePointer()+8);
                     }catch (EOFException e){
                         break;
                     }
@@ -124,74 +149,84 @@ public class LogFile {
         }
     }
 
+    /**
+     * 记录事务提交
+     * @param tid
+     * @throws IOException
+     */
     public synchronized void logCommit(TransactionId tid) throws IOException {
         preAppend();
         log.info("COMMIT " + tid.getId());
-        raf.writeInt(COMMIT_RECORD);
-        raf.writeLong(tid.getId());
-        raf.writeLong(currentOffset);
-        currentOffset = raf.getFilePointer();
+        randomAccessFile.writeInt(COMMIT_RECORD);
+        randomAccessFile.writeLong(tid.getId());
+        randomAccessFile.writeLong(currentOffset);
+        currentOffset = randomAccessFile.getFilePointer();
         force();
         tidToFirstLogRecord.remove(tid.getId());
     }
 
-
-    public  synchronized void logWrite(TransactionId tid, Page before, Page after) throws IOException  {
-        log.info("WRITE, offset = " + raf.getFilePointer());
+    /**
+     * 记录事务更新页面
+     * @param tid
+     * @param before
+     * @param after
+     * @throws IOException
+     */
+    public synchronized void logWrite(TransactionId tid, Page before, Page after) throws IOException  {
+        log.info("WRITE, offset = " + randomAccessFile.getFilePointer());
         preAppend();
-
-        raf.writeInt(UPDATE_RECORD);
-        raf.writeLong(tid.getId());
-        writePageData(raf,before);
-        writePageData(raf,after);
-        raf.writeLong(currentOffset);
-        currentOffset = raf.getFilePointer();
-
+        randomAccessFile.writeInt(UPDATE_RECORD);
+        randomAccessFile.writeLong(tid.getId());
+        writePageData(randomAccessFile,before);
+        writePageData(randomAccessFile,after);
+        randomAccessFile.writeLong(currentOffset);
+        currentOffset = randomAccessFile.getFilePointer();
         log.info("WRITE OFFSET = " + currentOffset);
     }
 
-    private void writePageData(RandomAccessFile raf, Page p) throws IOException{
+
+    private void writePageData(RandomAccessFile randomAccessFile, Page p) throws IOException{
         PageId pid = p.getId();
         int[] pageInfo = pid.serialize();
         String pageClassName = p.getClass().getName();
         String idClassName = pid.getClass().getName();
 
-        raf.writeUTF(pageClassName);
-        raf.writeUTF(idClassName);
+        randomAccessFile.writeUTF(pageClassName);
+        randomAccessFile.writeUTF(idClassName);
 
-        raf.writeInt(pageInfo.length);
+        randomAccessFile.writeInt(pageInfo.length);
         for (int j : pageInfo) {
-            raf.writeInt(j);
+            randomAccessFile.writeInt(j);
         }
         byte[] pageData = p.getPageData();
-        raf.writeInt(pageData.length);
-        raf.write(pageData);
+        randomAccessFile.writeInt(pageData.length);
+        randomAccessFile.write(pageData);
     }
 
-    private Page readPageData(RandomAccessFile raf) throws IOException {
+    private Page readPageData(RandomAccessFile randomAccessFile) throws IOException {
         PageId pid;
-        Page newPage = null;
+        Page newPage;
 
-        String pageClassName = raf.readUTF();
-        String idClassName = raf.readUTF();
+        String pageClassName = randomAccessFile.readUTF();
+        String idClassName = randomAccessFile.readUTF();
 
         try {
             Class<?> idClass = Class.forName(idClassName);
             Class<?> pageClass = Class.forName(pageClassName);
 
             Constructor<?>[] idConsts = idClass.getDeclaredConstructors();
-            int numIdArgs = raf.readInt();
+            int numIdArgs = randomAccessFile.readInt();
             Object[] idArgs = new Object[numIdArgs];
             for (int i = 0; i<numIdArgs;i++) {
-                idArgs[i] = raf.readInt();
+                idArgs[i] = randomAccessFile.readInt();
             }
             pid = (PageId)idConsts[0].newInstance(idArgs);
 
             Constructor<?>[] pageConsts = pageClass.getDeclaredConstructors();
-            int pageSize = raf.readInt();
+            int pageSize = randomAccessFile.readInt();
 
             byte[] pageData = new byte[pageSize];
-            raf.read(pageData);
+            randomAccessFile.read(pageData);
 
             Object[] pageArgs = new Object[2];
             pageArgs[0] = pid;
@@ -206,16 +241,23 @@ public class LogFile {
 
     }
 
+    /**
+     *  关闭数据库
+     */
     public synchronized void shutdown() {
         try {
             logCheckpoint();
-            raf.close();
+            randomAccessFile.close();
         } catch (IOException e) {
             System.out.println("ERROR SHUTTING DOWN -- IGNORING.");
             e.printStackTrace();
         }
     }
 
+    /**
+     * 记录检查点
+     * @throws IOException
+     */
     private void logCheckpoint() throws IOException {
         synchronized (Database.getBufferPool()) {
             synchronized (this) {
@@ -225,89 +267,81 @@ public class LogFile {
                 Iterator<Long> els = keys.iterator();
                 force();
                 Database.getBufferPool().flushAllPages();
-                startCpOffset = raf.getFilePointer();
-                raf.writeInt(CHECKPOINT_RECORD);
-                raf.writeLong(-1);
-
-                raf.writeInt(keys.size());
+                startCpOffset = randomAccessFile.getFilePointer();
+                randomAccessFile.writeInt(CHECKPOINT_RECORD);
+                randomAccessFile.writeLong(-1);
+                randomAccessFile.writeInt(keys.size());
+                //记录每个事务开始日志位置
                 while (els.hasNext()) {
                     Long key = els.next();
                     log.info("WRITING CHECKPOINT TRANSACTION ID: " + key);
-                    raf.writeLong(key);
-                    raf.writeLong(tidToFirstLogRecord.get(key));
+                    randomAccessFile.writeLong(key);
+                    randomAccessFile.writeLong(tidToFirstLogRecord.get(key));
                 }
-
-                endCpOffset = raf.getFilePointer();
-                raf.seek(0);
-                raf.writeLong(startCpOffset);
-                raf.seek(endCpOffset);
-                raf.writeLong(currentOffset);
-                currentOffset = raf.getFilePointer();
+                endCpOffset = randomAccessFile.getFilePointer();
+                randomAccessFile.seek(0);
+                randomAccessFile.writeLong(startCpOffset);
+                randomAccessFile.seek(endCpOffset);
+                randomAccessFile.writeLong(currentOffset);
+                currentOffset = randomAccessFile.getFilePointer();
             }
         }
         logTruncate();
     }
 
+    /**
+     *  截断日志，将旧日志复制到新日志中
+     * @throws IOException
+     */
     private synchronized void logTruncate() throws IOException {
         preAppend();
-        raf.seek(0);
-        long cpLoc = raf.readLong();
-
+        randomAccessFile.seek(0);
+        long cpLoc = randomAccessFile.readLong();
         long minLogRecord = cpLoc;
-
+        //读取每个事务开始日志位置，计算最小日志位置
         if (cpLoc != -1L) {
-            raf.seek(cpLoc);
-            int cpType = raf.readInt();
-            long cpTid = raf.readLong();
-
+            randomAccessFile.seek(cpLoc);
+            int cpType = randomAccessFile.readInt();
+            long cpTid = randomAccessFile.readLong();
             if (cpType != CHECKPOINT_RECORD) {
                 throw new RuntimeException("Checkpoint pointer does not point to checkpoint record");
             }
-
-            int numOutstanding = raf.readInt();
-
+            int numOutstanding = randomAccessFile.readInt();
             for (int i = 0; i < numOutstanding; i++) {
-                long tid = raf.readLong();
-                long firstLogRecord = raf.readLong();
+                long tid = randomAccessFile.readLong();
+                long firstLogRecord = randomAccessFile.readLong();
                 if (firstLogRecord < minLogRecord) {
                     minLogRecord = firstLogRecord;
                 }
             }
         }
-
-        File newFile = new File("logtmp" + System.currentTimeMillis());
+        File newFile = new File("logTmp" + System.currentTimeMillis());
         RandomAccessFile logNew = new RandomAccessFile(newFile, "rw");
         logNew.seek(0);
         logNew.writeLong((cpLoc - minLogRecord) + LONG_SIZE);
-
-        raf.seek(minLogRecord);
-
-
+        randomAccessFile.seek(minLogRecord);
+        //从最小日志位置开始，将log复制到logTmp
         while (true) {
             try {
-                int type = raf.readInt();
-                long record_tid = raf.readLong();
+                int type = randomAccessFile.readInt();
+                long record_tid = randomAccessFile.readLong();
                 long newStart = logNew.getFilePointer();
-
                 log.info("NEW START = " + newStart);
-
                 logNew.writeInt(type);
                 logNew.writeLong(record_tid);
-
                 switch (type) {
                     case UPDATE_RECORD:
-                        Page before = readPageData(raf);
-                        Page after = readPageData(raf);
-
+                        Page before = readPageData(randomAccessFile);
+                        Page after = readPageData(randomAccessFile);
                         writePageData(logNew, before);
                         writePageData(logNew, after);
                         break;
                     case CHECKPOINT_RECORD:
-                        int numXactions = raf.readInt();
+                        int numXactions = randomAccessFile.readInt();
                         logNew.writeInt(numXactions);
                         while (numXactions-- > 0) {
-                            long xid = raf.readLong();
-                            long xoffset = raf.readLong();
+                            long xid = randomAccessFile.readLong();
+                            long xoffset = randomAccessFile.readLong();
                             logNew.writeLong(xid);
                             logNew.writeLong((xoffset - minLogRecord) + LONG_SIZE);
                         }
@@ -316,58 +350,55 @@ public class LogFile {
                         tidToFirstLogRecord.put(record_tid,newStart);
                         break;
                 }
-
                 logNew.writeLong(newStart);
-                raf.readLong();
-
+                randomAccessFile.readLong();
             } catch (EOFException e) {
                 break;
             }
         }
-
-        log.info("TRUNCATING LOG;  WAS " + raf.length() + " BYTES ; NEW START : " + minLogRecord + " NEW LENGTH: " + (raf.length() - minLogRecord));
-
-        raf.close();
+        log.info("TRUNCATING LOG;  WAS " + randomAccessFile.length() + " BYTES ; NEW START : " + minLogRecord + " NEW LENGTH: " + (randomAccessFile.length() - minLogRecord));
+        randomAccessFile.close();
         logFile.delete();
         newFile.renameTo(logFile);
-        raf = new RandomAccessFile(logFile, "rw");
-        raf.seek(raf.length());
+        randomAccessFile = new RandomAccessFile(logFile, "rw");
+        randomAccessFile.seek(randomAccessFile.length());
         newFile.delete();
-
-        currentOffset = raf.getFilePointer();;
+        currentOffset = randomAccessFile.getFilePointer();;
     }
 
+    /**
+     * 恢复数据库
+     * @throws IOException
+     */
     public void recover() throws IOException {
         synchronized (Database.getBufferPool()) {
             synchronized (this) {
                 recoveryUndecided = false;
-                HashMap<Long, List<Page[]>> undoMap = new HashMap<>();
-                raf.seek(0);
+                HashMap<Long, List<Page[]>> undoMap = new HashMap<>();//key:事务id  value:事务对应页面
+                randomAccessFile.seek(0);
                 print();
-                long checkpoint = raf.readLong();
+                long checkpoint = randomAccessFile.readLong();
                 if(checkpoint!=-1){
                     HashMap<Long, Long> tidPos = new HashMap<>();
-                    raf.seek(checkpoint);
-                    //跳过record type和tid
-                    raf.seek(raf.getFilePointer()+12);
-                    //获取正在进行事务的个数
-                    int num = raf.readInt();
+                    randomAccessFile.seek(checkpoint);
+                    //跳过recordType和tid
+                    randomAccessFile.seek(randomAccessFile.getFilePointer()+12);
+                    int num = randomAccessFile.readInt();
                     while(num>0){
-                        //获取每一个事务的tid和第一条log record OFFSET
-                        long curTid = raf.readLong();
-                        long offset = raf.readLong();
+                        long curTid = randomAccessFile.readLong();
+                        long offset = randomAccessFile.readLong();
                         tidPos.put(curTid,offset);
                         num--;
                     }
                     for(Long pos:tidPos.keySet()){
-                        raf.seek(tidPos.get(pos));
-                        recoverSearch(raf,undoMap);
+                        randomAccessFile.seek(tidPos.get(pos));
+                        recoverSearch(randomAccessFile,undoMap);
                     }
                 }else{
-                    System.out.println(raf.getFilePointer() + "-----------");
-                    recoverSearch(raf, undoMap);
+                    System.out.println(randomAccessFile.getFilePointer() + "-----------");
+                    recoverSearch(randomAccessFile, undoMap);
                 }
-                //进行undo操作
+                //写入旧页面，恢复数据库
                 for(Long tid:undoMap.keySet()){
                     Page[] pages = undoMap.get(tid).get(0);
                     Page before = pages[0];
@@ -379,89 +410,101 @@ public class LogFile {
         }
     }
 
-    private void recoverSearch(RandomAccessFile raf,Map<Long,List<Page[]>> map) throws IOException {
+    /**
+     * 将需要恢复的事务和页面放入undoMap中
+     * @param randomAccessFile
+     * @param map
+     * @throws IOException
+     */
+    private void recoverSearch(RandomAccessFile randomAccessFile,Map<Long,List<Page[]>> map) throws IOException {
         while(true){
             try{
-                int type = raf.readInt();
-                long curTid = raf.readLong();
-                if(type==3){
+                int type = randomAccessFile.readInt();
+                long curTid = randomAccessFile.readLong();
+                if(type==UPDATE_RECORD){
                     if(!map.containsKey(curTid)){
                         map.put(curTid,new ArrayList<>());
                     }
-                    Page before = readPageData(raf);
-                    Page after = readPageData(raf);
+                    Page before = readPageData(randomAccessFile);
+                    Page after = readPageData(randomAccessFile);
                     map.get(curTid).add(new Page[]{before,after});
-                }else if(type==2 && map.containsKey(curTid)){
+                }else if(type==COMMIT_RECORD && map.containsKey(curTid)){
+                    //崩溃前提交，将最新页面刷盘，从undoMap中移除
                     Page[] pages = map.get(curTid).get(map.get(curTid).size() - 1);
                     Page after = pages[1];
                     DbFile databaseFile = Database.getCatalog().getDatabaseFile(after.getId().getTableId());
                     databaseFile.writePage(after);
                     map.remove(curTid);
-                }else if(type==1 && map.containsKey(curTid)){
+                }else if(type==ABORT_RECORD && map.containsKey(curTid)){
+                    //崩溃前回滚，将最旧页面刷盘，从undoMap中移除
                     Page[] pages = map.get(curTid).get(0);
                     Page before = pages[0];
                     DbFile databaseFile = Database.getCatalog().getDatabaseFile(before.getId().getTableId());
                     databaseFile.writePage(before);
                     map.remove(curTid);
                 }
-                raf.seek(raf.getFilePointer()+8);
+                randomAccessFile.seek(randomAccessFile.getFilePointer()+8);
             }catch (EOFException e){
                 break;
             }
         }
     }
 
+    /**
+     * 打印日志
+     * @throws IOException
+     */
     private void print() throws IOException {
-        long curOffset = raf.getFilePointer();
+        long curOffset = randomAccessFile.getFilePointer();
 
-        raf.seek(0);
+        randomAccessFile.seek(0);
 
-        System.out.println("0: checkpoint record at offset " + raf.readLong());
+        System.out.println("0: checkpoint record at offset " + randomAccessFile.readLong());
 
         while (true) {
             try {
-                int cpType = raf.readInt();
-                long cpTid = raf.readLong();
+                int cpType = randomAccessFile.readInt();
+                long cpTid = randomAccessFile.readLong();
 
-                System.out.println((raf.getFilePointer() - (INT_SIZE + LONG_SIZE)) + ": RECORD TYPE " + cpType);
-                System.out.println((raf.getFilePointer() - LONG_SIZE) + ": TID " + cpTid);
+                System.out.println((randomAccessFile.getFilePointer() - (INT_SIZE + LONG_SIZE)) + ": RECORD TYPE " + cpType);
+                System.out.println((randomAccessFile.getFilePointer() - LONG_SIZE) + ": TID " + cpTid);
 
                 switch (cpType) {
                     case BEGIN_RECORD:
                         System.out.println(" (BEGIN)");
-                        System.out.println(raf.getFilePointer() + ": RECORD START OFFSET: " + raf.readLong());
+                        System.out.println(randomAccessFile.getFilePointer() + ": RECORD START OFFSET: " + randomAccessFile.readLong());
                         break;
                     case ABORT_RECORD:
                         System.out.println(" (ABORT)");
-                        System.out.println(raf.getFilePointer() + ": RECORD START OFFSET: " + raf.readLong());
+                        System.out.println(randomAccessFile.getFilePointer() + ": RECORD START OFFSET: " + randomAccessFile.readLong());
                         break;
                     case COMMIT_RECORD:
                         System.out.println(" (COMMIT)");
-                        System.out.println(raf.getFilePointer() + ": RECORD START OFFSET: " + raf.readLong());
+                        System.out.println(randomAccessFile.getFilePointer() + ": RECORD START OFFSET: " + randomAccessFile.readLong());
                         break;
 
                     case CHECKPOINT_RECORD:
                         System.out.println(" (CHECKPOINT)");
-                        int numTransactions = raf.readInt();
-                        System.out.println((raf.getFilePointer() - INT_SIZE) + ": NUMBER OF OUTSTANDING RECORDS: " + numTransactions);
+                        int numTransactions = randomAccessFile.readInt();
+                        System.out.println((randomAccessFile.getFilePointer() - INT_SIZE) + ": NUMBER OF OUTSTANDING RECORDS: " + numTransactions);
 
                         while (numTransactions-- > 0) {
-                            long tid = raf.readLong();
-                            long firstRecord = raf.readLong();
-                            System.out.println((raf.getFilePointer() - (LONG_SIZE + LONG_SIZE)) + ": TID: " + tid);
-                            System.out.println((raf.getFilePointer() - LONG_SIZE) + ": FIRST LOG RECORD: " + firstRecord);
+                            long tid = randomAccessFile.readLong();
+                            long firstRecord = randomAccessFile.readLong();
+                            System.out.println((randomAccessFile.getFilePointer() - (LONG_SIZE + LONG_SIZE)) + ": TID: " + tid);
+                            System.out.println((randomAccessFile.getFilePointer() - LONG_SIZE) + ": FIRST LOG RECORD: " + firstRecord);
                         }
-                        System.out.println(raf.getFilePointer() + ": RECORD START OFFSET: " + raf.readLong());
+                        System.out.println(randomAccessFile.getFilePointer() + ": RECORD START OFFSET: " + randomAccessFile.readLong());
 
                         break;
                     case UPDATE_RECORD:
                         System.out.println(" (UPDATE)");
 
-                        long start = raf.getFilePointer();
-                        Page before = readPageData(raf);
+                        long start = randomAccessFile.getFilePointer();
+                        Page before = readPageData(randomAccessFile);
 
-                        long middle = raf.getFilePointer();
-                        Page after = readPageData(raf);
+                        long middle = randomAccessFile.getFilePointer();
+                        Page after = readPageData(randomAccessFile);
 
                         System.out.println(start + ": before image table id " + before.getId().getTableId());
                         System.out.println((start + INT_SIZE) + ": before image page number " + before.getId().getPageNumber());
@@ -469,9 +512,9 @@ public class LogFile {
 
                         System.out.println(middle + ": after image table id " + after.getId().getTableId());
                         System.out.println((middle + INT_SIZE) + ": after image page number " + after.getId().getPageNumber());
-                        System.out.println((middle + INT_SIZE) + " TO " + (raf.getFilePointer()) + ": page data");
+                        System.out.println((middle + INT_SIZE) + " TO " + (randomAccessFile.getFilePointer()) + ": page data");
 
-                        System.out.println(raf.getFilePointer() + ": RECORD START OFFSET: " + raf.readLong());
+                        System.out.println(randomAccessFile.getFilePointer() + ": RECORD START OFFSET: " + randomAccessFile.readLong());
 
                         break;
                 }
@@ -482,13 +525,13 @@ public class LogFile {
             }
         }
 
-        raf.seek(curOffset);
+        randomAccessFile.seek(curOffset);
     }
 
 
 
-    public  synchronized void force() throws IOException {
+    public synchronized void force() throws IOException {
         //进行刷盘
-        raf.getChannel().force(true);
+        randomAccessFile.getChannel().force(true);
     }
 }

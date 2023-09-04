@@ -10,15 +10,15 @@ import java.util.NoSuchElementException;
 public class TupleArrayIterator implements OpIterator {
 
     private static final long serialVersionUID = 1L;
-    final List<Tuple> tups;
+    final List<Tuple> tuples;
     Iterator<Tuple> it = null;
 
-    public TupleArrayIterator(List<Tuple> tups) {
-        this.tups = tups;
+    public TupleArrayIterator(List<Tuple> tuples) {
+        this.tuples = tuples;
     }
 
     public void open() {
-        it = tups.iterator();
+        it = tuples.iterator();
     }
 
     public boolean hasNext() {
@@ -30,11 +30,11 @@ public class TupleArrayIterator implements OpIterator {
     }
 
     public void rewind() {
-        it = tups.iterator();
+        it = tuples.iterator();
     }
 
     public TupleDesc getTupleDesc() {
-        return tups.get(0).getTupleDesc();
+        return tuples.get(0).getTupleDesc();
     }
 
     public void close() {

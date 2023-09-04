@@ -7,10 +7,10 @@ import lombok.ToString;
 
 @EqualsAndHashCode
 @ToString
-public class LogicalSubplanJoinNode extends LogicalJoinNode{
-    public OpIterator subPlan;
+public class LogicalSubPlanJoinNode extends LogicalJoinNode{
+    public OpIterator subPlan;//子查询结果迭代器
 
-    public LogicalSubplanJoinNode(String table1, String joinField1, OpIterator sp, Predicate.Op pred) {
+    public LogicalSubPlanJoinNode(String table1, String joinField1, OpIterator sp, Predicate.Op pred) {
         t1Alias = table1;
         String[] tmps = joinField1.split("[.]");
         if (tmps.length>1)
@@ -22,8 +22,8 @@ public class LogicalSubplanJoinNode extends LogicalJoinNode{
         p = pred;
     }
 
-    public LogicalSubplanJoinNode swapInnerOuter() {
-        return new LogicalSubplanJoinNode(t1Alias,f1PureName,subPlan, p);
+    public LogicalSubPlanJoinNode swapInnerOuter() {
+        return new LogicalSubPlanJoinNode(t1Alias,f1PureName,subPlan, p);
     }
 
     @Override
@@ -34,9 +34,9 @@ public class LogicalSubplanJoinNode extends LogicalJoinNode{
     @Override
     public boolean equals(Object o) {
         LogicalJoinNode j2 =(LogicalJoinNode)o;
-        if (!(o instanceof LogicalSubplanJoinNode))
+        if (!(o instanceof LogicalSubPlanJoinNode))
             return false;
 
-        return (j2.t1Alias.equals(t1Alias)  && j2.f1PureName.equals(f1PureName) && ((LogicalSubplanJoinNode)o).subPlan.equals(subPlan));
+        return (j2.t1Alias.equals(t1Alias)  && j2.f1PureName.equals(f1PureName) && ((LogicalSubPlanJoinNode)o).subPlan.equals(subPlan));
     }
 }

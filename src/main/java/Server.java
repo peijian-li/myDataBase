@@ -13,12 +13,9 @@ import transaction.TransactionId;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.lang.reflect.InvocationTargetException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.NoSuchElementException;
 
 @Slf4j
@@ -27,19 +24,11 @@ public class Server {
     @Setter
     private Transaction currentTransaction = null;//当前事务
 
-    public static void main (String[] args) throws DbException, TransactionAbortedException, IOException {
-        List<List<Integer>> tuples=new ArrayList<>();
-        int columns=10;
-        tuples.add(new ArrayList<>());
-        for(int i=0;i<columns;i++){
-            tuples.get(0).add(1);
-        }
-        File temp = File.createTempFile("table", ".dat");
-        temp.deleteOnExit();
-        HeapFileEncoder.convert(tuples, temp, BufferPool.getPageSize(), columns);
-        HeapFile heapFile = Utility.openHeapFile(columns, "", temp);
-        Database.getCatalog().addTable(heapFile, "student");
-        TableStats.setTableStats("student", new TableStats(Database.getCatalog().getTableId("student"), 100));
+    public static void main (String[] args) throws IOException {
+
+
+
+
         Server server = new Server();
         server.processNextStatement("SELECT * FROM student WHERE c1 = 1;");
     }
@@ -61,31 +50,28 @@ public class Server {
                 }
                 try {
                     if (s instanceof ZInsert)
-                        query = handleInsertStatement((ZInsert) s,
-                                currentTransaction.getId());
+                        query = handleInsertStatement((ZInsert) s, currentTransaction.getId());
                     else if (s instanceof ZDelete)
-                        query = handleDeleteStatement((ZDelete) s,
-                                currentTransaction.getId());
+                        query = handleDeleteStatement((ZDelete) s, currentTransaction.getId());
                     else if (s instanceof ZQuery)
-                        query = handleQueryStatement((ZQuery) s,
-                                currentTransaction.getId());
+                        query = handleQueryStatement((ZQuery) s, currentTransaction.getId());
+                    else if (s instanceof ZUpdate)
+                        query = handleUpdateStatement((ZUpdate) s, currentTransaction.getId());
                     else {
                         System.out.println("Can't parse " + s + "\n -- parser only handles SQL transactions, insert, delete, and select statements");
                     }
+
                     if (query != null)
                         query.execute();
 
                     if ( currentTransaction != null) {
                         currentTransaction.commit();
-                        System.out.println("Transaction "
-                                + currentTransaction.getId().getId() + " committed.");
+                        System.out.println("Transaction " + currentTransaction.getId().getId() + " committed.");
                     }
                 } catch (Throwable a) {
                     if (currentTransaction != null) {
                         currentTransaction.abort();
-                        System.out.println("Transaction "
-                                + currentTransaction.getId().getId()
-                                + " aborted because of unhandled error");
+                        System.out.println("Transaction " + currentTransaction.getId().getId() + " aborted because of unhandled error");
                     }
 
                     if (a instanceof common.ParseException || a instanceof Zql.ParseException)
@@ -116,22 +102,18 @@ public class Server {
                             "No transaction is currently running");
                 currentTransaction.commit();
                 currentTransaction = null;
-                System.out.println("Transaction " + currentTransaction.getId().getId()
-                        + " committed.");
+                System.out.println("Transaction " + currentTransaction.getId().getId() + " committed.");
                 break;
             case "ROLLBACK":
                 if (currentTransaction == null)
                     throw new common.ParseException("No transaction is currently running");
                 currentTransaction.abort();
                 currentTransaction = null;
-                System.out.println("Transaction " + currentTransaction.getId().getId()
-                        + " aborted.");
-
+                System.out.println("Transaction " + currentTransaction.getId().getId() + " aborted.");
                 break;
             case "SET TRANSACTION":
                 if (currentTransaction != null)
-                    throw new common.ParseException(
-                            "Can't start new transactions until current transaction has been committed or rolledback.");
+                    throw new common.ParseException("Can't start new transactions until current transaction has been committed or rolledback.");
                 currentTransaction = new Transaction();
                 currentTransaction.start();
                 System.out.println("Started a new transaction tid = " + currentTransaction.getId().getId());
@@ -146,92 +128,77 @@ public class Server {
         try {
             tableId = Database.getCatalog().getTableId(s.getTable());
         } catch (NoSuchElementException e) {
-            throw new common.ParseException("Unknown table : "
-                    + s.getTable());
+            throw new common.ParseException("Unknown table : " + s.getTable());
         }
 
         TupleDesc td = Database.getCatalog().getTupleDesc(tableId);
 
         Tuple t = new Tuple(td);
         int i = 0;
-        OpIterator newTups;
+        OpIterator newTuples;
 
         if (s.getValues() != null) {
             List<ZExp> values = s.getValues();
             if (td.numFields() != values.size()) {
-                throw new common.ParseException(
-                        "INSERT statement does not contain same number of fields as table "
-                                + s.getTable());
+                throw new common.ParseException("INSERT statement does not contain same number of fields as table " + s.getTable());
             }
             for (ZExp e : values) {
-
                 if (!(e instanceof ZConstant))
-                    throw new common.ParseException(
-                            "Complex expressions not allowed in INSERT statements.");
+                    throw new common.ParseException("Complex expressions not allowed in INSERT statements.");
                 ZConstant zc = (ZConstant) e;
                 if (zc.getType() == ZConstant.NUMBER) {
                     if (td.getFieldType(i) != Type.INT_TYPE) {
-                        throw new common.ParseException("Value "
-                                + zc.getValue()
-                                + " is not an integer, expected a string.");
+                        throw new common.ParseException("Value " + zc.getValue() + " is not an integer, expected a string.");
                     }
                     IntField f = new IntField(new Integer(zc.getValue()));
                     t.setField(i, f);
                 } else if (zc.getType() == ZConstant.STRING) {
                     if (td.getFieldType(i) != Type.STRING_TYPE) {
-                        throw new common.ParseException("Value "
-                                + zc.getValue()
-                                + " is a string, expected an integer.");
+                        throw new common.ParseException("Value " + zc.getValue() + " is a string, expected an integer.");
                     }
-                    StringField f = new StringField(zc.getValue(),
-                            Type.STRING_LEN);
+                    StringField f = new StringField(zc.getValue(), Type.STRING_LEN);
                     t.setField(i, f);
                 } else {
-                    throw new common.ParseException(
-                            "Only string or int fields are supported.");
+                    throw new common.ParseException("Only string or int fields are supported.");
                 }
-
                 i++;
             }
-            List<Tuple> tups = new ArrayList<>();
-            tups.add(t);
-            newTups = new TupleArrayIterator(tups);
-
+            List<Tuple> tuples = new ArrayList<>();
+            tuples.add(t);
+            newTuples = new TupleArrayIterator(tuples);
         } else {
             ZQuery zq = s.getQuery();
             LogicalPlan lp = parseQueryLogicalPlan(tId, zq);
-            newTups = lp.physicalPlan(tId, TableStats.getStatsMap(), explain);
+            newTuples = lp.physicalPlan(tId, TableStats.getStatsMap(), explain);
         }
-        Query insertQ = new Query(tId);
-        insertQ.setPhysicalPlan(new Insert(tId, newTups, tableId));
-        return insertQ;
+        Query query = new Query(tId);
+        query.setPhysicalPlan(new Insert(tId, newTuples, tableId));
+        return query;
     }
 
     private Query handleDeleteStatement(ZDelete s, TransactionId tid) throws common.ParseException, IOException, ParseException {
         int id;
         try {
-            id = Database.getCatalog().getTableId(s.getTable()); // will fall
+            id = Database.getCatalog().getTableId(s.getTable());
         } catch (NoSuchElementException e) {
-            throw new common.ParseException("Unknown table : "
-                    + s.getTable());
+            throw new common.ParseException("Unknown table : " + s.getTable());
         }
         String name = s.getTable();
-        Query sdbq = new Query(tid);
-
+        Query query = new Query(tid);
         LogicalPlan lp = new LogicalPlan();
         lp.setQuery(s.toString());
-
         lp.addScan(id, name);
         if (s.getWhere() != null)
             processExpression(tid, (ZExpression) s.getWhere(), lp);
         lp.addProjectField("null.*", null);
+        OpIterator op = new Delete(tid, lp.physicalPlan(tid, TableStats.getStatsMap(), false));
+        query.setPhysicalPlan(op);
+        return query;
 
-        OpIterator op = new Delete(tid, lp.physicalPlan(tid,
-                TableStats.getStatsMap(), false));
-        sdbq.setPhysicalPlan(op);
+    }
 
-        return sdbq;
-
+    private Query handleUpdateStatement(ZUpdate s, TransactionId tid){
+        return null;
     }
 
 
@@ -325,8 +292,9 @@ public class Server {
                 System.out.println("Aggregate field is " + aggregateField + ", agg fun is : " + aggregateOperator);
                 lp.addProjectField(aggregateField, aggregateOperator);
             } else {
+                //有分组字段时，非聚合字段必须为分组字段
                 if (groupByField != null && !(groupByField.equals(select.getTable() + "." + select.getColumn()) || groupByField.equals(select.getColumn()))) {
-                    throw new common.ParseException("字段 " + select.getColumn() + " 用于分组而不进行聚合");
+                    throw new common.ParseException("Non-aggregate field " + select.getColumn() + " does not appear in GROUP BY list.");
                 }
                 lp.addProjectField(select.getTable() + "." + select.getColumn(), null);
             }

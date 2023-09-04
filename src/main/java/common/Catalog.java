@@ -3,7 +3,7 @@ package common;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import storage.DbFile;
-import storage.HeapFile;
+import heap.HeapFile;
 import storage.TupleDesc;
 
 import java.io.BufferedReader;

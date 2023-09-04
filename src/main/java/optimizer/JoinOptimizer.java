@@ -20,7 +20,6 @@ public class JoinOptimizer {
     private List<LogicalJoinNode> joins;
 
     public static OpIterator instantiateJoin(LogicalJoinNode lj, OpIterator plan1, OpIterator plan2) throws ParseException {
-
         int t1id = 0, t2id = 0;
         OpIterator j;
 
@@ -30,26 +29,20 @@ public class JoinOptimizer {
         } catch (NoSuchElementException e) {
             throw new ParseException("Unknown field " + lj.f1QuantifiedName);
         }
-
-        if (lj instanceof LogicalSubplanJoinNode) {
+        if (lj instanceof LogicalSubPlanJoinNode) {
             t2id = 0;
         } else {
             try {
-                t2id = plan2.getTupleDesc().fieldNameToIndex(
-                        lj.f2QuantifiedName);
+                t2id = plan2.getTupleDesc().fieldNameToIndex(lj.f2QuantifiedName);
             } catch (NoSuchElementException e) {
-                throw new ParseException("Unknown field "
-                        + lj.f2QuantifiedName);
+                throw new ParseException("Unknown field " + lj.f2QuantifiedName);
             }
         }
 
-        //2. 进行一次join操作
+        //2. join
         JoinPredicate p = new JoinPredicate(t1id, lj.p, t2id);
         j = new Join(p, plan1, plan2);
-
-
         return j;
-
     }
 
     /**
@@ -62,7 +55,7 @@ public class JoinOptimizer {
      * @return
      */
     public double estimateJoinCost(LogicalJoinNode j, int cardinality1, int cardinality2, double cost1, double cost2) {
-        if (j instanceof LogicalSubplanJoinNode) {
+        if (j instanceof LogicalSubPlanJoinNode) {
             //子查询
             return cardinality1 + cost1 + cost2;
         } else {
@@ -81,7 +74,7 @@ public class JoinOptimizer {
      * @return
      */
     public int estimateJoinCardinality(LogicalJoinNode j, int cardinality1, int cardinality2, boolean t1pkey, boolean t2pkey, Map<String, TableStats> stats) {
-        if (j instanceof LogicalSubplanJoinNode) {
+        if (j instanceof LogicalSubPlanJoinNode) {
             //子查询
             return cardinality1;
         } else {
@@ -123,7 +116,7 @@ public class JoinOptimizer {
     }
 
 
-    public List<LogicalJoinNode> orderJoins(Map<String, TableStats> stats, Map<String, Double> filterSelectivities, boolean explain) throws ParseException {
+    public List<LogicalJoinNode> orderJoins(Map<String, TableStats> stats, Map<String, Double> filterSelectivityMap, boolean explain) throws ParseException {
         int size = joins.size();
         //记录最优查询计划
         PlanCache planCache = new PlanCache();
@@ -136,7 +129,7 @@ public class JoinOptimizer {
                 bestCostCard = new CostCard();
                 for(LogicalJoinNode logicalJoinNode:s){
                     //计算 logicalJoinNode 与 其他node(s中的其它node)的join 结果
-                    CostCard costCard = computeCostAndCardOfSubplan(stats, filterSelectivities, logicalJoinNode, s, bestCost, planCache);
+                    CostCard costCard = computeCostAndCardOfSubplan(stats, filterSelectivityMap, logicalJoinNode, s, bestCost, planCache);
                     if(costCard==null){
                         continue;
                     }
@@ -151,7 +144,7 @@ public class JoinOptimizer {
         //是否解释其查询计划
         if(explain){
             assert bestCostCard!=null;
-            printJoins(bestCostCard.plan,planCache,stats,filterSelectivities);
+            printJoins(bestCostCard.plan,planCache,stats,filterSelectivityMap);
         }
         assert bestCostCard!=null;
         return bestCostCard.plan;
@@ -195,7 +188,7 @@ public class JoinOptimizer {
     }
 
     private CostCard computeCostAndCardOfSubplan(Map<String, TableStats> stats,
-                                                 Map<String, Double> filterSelectivities,
+                                                 Map<String, Double> filterSelectivityMap,
                                                  LogicalJoinNode joinToRemove,
                                                  Set<LogicalJoinNode> joinSet,
                                                  double bestCostSoFar,
@@ -228,11 +221,11 @@ public class JoinOptimizer {
             prevBest = new ArrayList<>();
 
             t1cost = stats.get(table1Name).estimateScanCost();
-            t1card = stats.get(table1Name).estimateTableCardinality(filterSelectivities.get(j.t1Alias));
+            t1card = stats.get(table1Name).estimateTableCardinality(filterSelectivityMap.get(j.t1Alias));
             leftPkey = isPkey(j.t1Alias, j.f1PureName);
 
             t2cost = table2Alias == null ? 0 : stats.get(table2Name).estimateScanCost();
-            t2card = table2Alias == null ? 0 : stats.get(table2Name).estimateTableCardinality(filterSelectivities.get(j.t2Alias));
+            t2card = table2Alias == null ? 0 : stats.get(table2Name).estimateTableCardinality(filterSelectivityMap.get(j.t2Alias));
             rightPkey = table2Alias != null && isPkey(table2Alias, j.f2PureName);
 
         } else {
@@ -254,7 +247,7 @@ public class JoinOptimizer {
                 leftPkey = hasPkey(prevBest);
 
                 t2cost = j.t2Alias == null ? 0 : stats.get(table2Name).estimateScanCost();
-                t2card = j.t2Alias == null ? 0 : stats.get(table2Name).estimateTableCardinality(filterSelectivities.get(j.t2Alias));
+                t2card = j.t2Alias == null ? 0 : stats.get(table2Name).estimateTableCardinality(filterSelectivityMap.get(j.t2Alias));
                 rightPkey = j.t2Alias != null && isPkey(j.t2Alias, j.f2PureName);
 
             } else if (doesJoin(prevBest, j.t2Alias)) {
@@ -264,7 +257,7 @@ public class JoinOptimizer {
                 rightPkey = hasPkey(prevBest);
 
                 t1cost = stats.get(table1Name).estimateScanCost();
-                t1card = stats.get(table1Name).estimateTableCardinality(filterSelectivities.get(j.t1Alias));
+                t1card = stats.get(table1Name).estimateTableCardinality(filterSelectivityMap.get(j.t1Alias));
                 leftPkey = isPkey(j.t1Alias, j.f1PureName);
 
             } else {

@@ -1,5 +1,8 @@
 package common;
 
+import heap.HeapFile;
+import heap.HeapPage;
+import heap.HeapPageId;
 import storage.*;
 
 import java.io.File;
