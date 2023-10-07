@@ -154,7 +154,6 @@ public class BTreeLeafPage extends BTreePage{
         ByteArrayOutputStream baos = new ByteArrayOutputStream(len);
         DataOutputStream dos = new DataOutputStream(baos);
 
-        // write out the parent and sibling pointers
         try {
             dos.writeInt(parent);
 
@@ -179,7 +178,6 @@ public class BTreeLeafPage extends BTreePage{
             try {
                 dos.writeByte(b);
             } catch (IOException e) {
-                // this really shouldn't happen
                 e.printStackTrace();
             }
         }

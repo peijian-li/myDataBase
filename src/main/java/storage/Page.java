@@ -6,6 +6,10 @@ public interface Page {
 
     PageId getId();
 
+    /**
+     * 非脏页返回null，脏页返回修改的事务id
+     * @return
+     */
     TransactionId isDirty();
 
     void markDirty(boolean dirty, TransactionId tid);
@@ -17,8 +21,4 @@ public interface Page {
     byte[] getPageData();
 
 
-    Page getBeforeImage();
-
-
-    void setBeforeImage();
 }

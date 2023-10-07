@@ -18,9 +18,8 @@ public abstract class BTreePage implements Page {
     protected final BTreePageId pid; //当前节点的BTreePageId
     protected final TupleDesc td;  //tuple描述
     protected final int keyField;  //索引字段下标
-    protected int parent; //当前page的父page，如果是根节点那么就是0
+    protected int parent; //当前page的父page，如果当前page是根节点那么parent就是0
 
-    protected byte[] oldData;//存储旧的数据
 
     public BTreePage(BTreePageId id, int key) {
         this.pid = id;

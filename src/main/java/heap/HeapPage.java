@@ -18,9 +18,7 @@ public class HeapPage implements Page {
     private final byte[] header; //存储每个tuple状态，一个字节存储8个tuple状态
     private final Tuple[] tuples;
     private final int numSlots;//tuple数量
-    private final Byte oldDataLock= (byte) 0;
 
-    private byte[] oldData;
     private Boolean dirty;
     private TransactionId transactionId;
 
@@ -43,7 +41,6 @@ public class HeapPage implements Page {
             e.printStackTrace();
         }
         dis.close();
-        setBeforeImage();
     }
 
     /**
@@ -275,25 +272,5 @@ public class HeapPage implements Page {
         return baos.toByteArray();
     }
 
-    @Override
-    public Page getBeforeImage() {
-        try {
-            byte[] oldDataRef = null;
-            synchronized(oldDataLock) {
-                oldDataRef = oldData;
-            }
-            return new HeapPage(pid,oldDataRef);
-        } catch (IOException e) {
-            e.printStackTrace();
-            System.exit(1);
-        }
-        return null;
-    }
 
-    @Override
-    public void setBeforeImage() {
-        synchronized(oldDataLock) {
-            oldData = getPageData().clone();
-        }
-    }
 }

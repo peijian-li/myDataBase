@@ -41,12 +41,10 @@ public class Transaction {
         if (started) {
             if (abort) {
                 Database.getLogFile().logAbort(tid);
-            }
-            Database.getBufferPool().transactionComplete(tid, !abort);
-            if (!abort) {
+            }else{
                 Database.getLogFile().logCommit(tid);
             }
-
+            Database.getBufferPool().transactionComplete(tid, !abort);
             started = false;
         }
     }

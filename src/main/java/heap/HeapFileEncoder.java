@@ -58,7 +58,7 @@ public class HeapFileEncoder {
 
         int nheaderbytes = (nrecords / 8);
         if (nheaderbytes * 8 < nrecords)
-            nheaderbytes++;  //ceiling
+            nheaderbytes++;
         int nheaderbits = nheaderbytes * 8;
 
         BufferedReader br = new BufferedReader(new FileReader(inFile));
@@ -81,7 +81,6 @@ public class HeapFileEncoder {
         while (!done) {
             int c = br.read();
 
-            // Ignore Windows/Notepad special line endings
             if (c == '\r')
                 continue;
 

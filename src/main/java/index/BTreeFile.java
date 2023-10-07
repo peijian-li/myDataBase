@@ -75,7 +75,6 @@ public class BTreeFile implements DbFile {
     @Override
     public void writePage(Page page) throws IOException {
         BTreePageId id = (BTreePageId) page.getId();
-
         byte[] data = page.getPageData();
         RandomAccessFile rf = new RandomAccessFile(f, "rw");
         if(id.getPageCategory() == BTreePageId.ROOT_PTR) {
@@ -341,6 +340,14 @@ public class BTreeFile implements DbFile {
         return page;
     }
 
+    /**
+     * 将page的子节点的父节点指向page
+     * @param tid
+     * @param dirtypages
+     * @param page
+     * @throws DbException
+     * @throws TransactionAbortedException
+     */
     private void updateParentPointers(TransactionId tid, Map<PageId, Page> dirtypages, BTreeInternalPage page)
             throws DbException, TransactionAbortedException{
         Iterator<BTreeEntry> it = page.iterator();
@@ -359,6 +366,7 @@ public class BTreeFile implements DbFile {
     private void updateParentPointer(TransactionId tid, Map<PageId, Page> dirtyPages, BTreePageId pid, BTreePageId child)
             throws DbException, TransactionAbortedException {
         BTreePage p = (BTreePage) getPage(tid, dirtyPages, child, Permissions.READ_ONLY);
+        //child的父节点不是page则修改指向
         if(!p.getParentId().equals(pid)) {
             p = (BTreePage) getPage(tid, dirtyPages, child, Permissions.READ_WRITE);
             p.setParentId(pid);
@@ -389,12 +397,22 @@ public class BTreeFile implements DbFile {
         }
     }
 
+    /**
+     * 处理空位超过一半的page
+     * @param tid
+     * @param dirtypages
+     * @param page
+     * @throws DbException
+     * @throws IOException
+     * @throws TransactionAbortedException
+     */
     private void handleMinOccupancyPage(TransactionId tid, Map<PageId, Page> dirtypages, BTreePage page)
             throws DbException, IOException, TransactionAbortedException {
         BTreePageId parentId = page.getParentId();
         BTreeEntry leftEntry = null;
         BTreeEntry rightEntry = null;
         BTreeInternalPage parent = null;
+        //不是根节点，找到左右父entry
         if(parentId.getPageCategory() != BTreePageId.ROOT_PTR) {
             parent = (BTreeInternalPage) getPage(tid, dirtypages, parentId, Permissions.READ_WRITE);
             Iterator<BTreeEntry> ite = parent.iterator();
@@ -423,11 +441,15 @@ public class BTreeFile implements DbFile {
             throws DbException, IOException, TransactionAbortedException {
         BTreePageId leftSiblingId = null;
         BTreePageId rightSiblingId = null;
-        if(leftEntry != null) leftSiblingId = leftEntry.getLeftChild();
-        if(rightEntry != null) rightSiblingId = rightEntry.getRightChild();
+        //获得左右兄弟
+        if(leftEntry != null)
+            leftSiblingId = leftEntry.getLeftChild();
+        if(rightEntry != null)
+            rightSiblingId = rightEntry.getRightChild();
 
-        int maxEmptySlots = page.getMaxTuples() - page.getMaxTuples()/2; // ceiling
+        int maxEmptySlots = page.getMaxTuples() - page.getMaxTuples()/2;
         if(leftSiblingId != null) {
+            //左兄弟空位超过一半，则与左兄弟合并，否则从左兄弟窃取
             BTreeLeafPage leftSibling = (BTreeLeafPage) getPage(tid, dirtypages, leftSiblingId, Permissions.READ_WRITE);
             if(leftSibling.getNumEmptySlots() >= maxEmptySlots) {
                 mergeLeafPages(tid, dirtypages, leftSibling, page, parent, leftEntry);
@@ -437,6 +459,7 @@ public class BTreeFile implements DbFile {
             }
         }
         else if(rightSiblingId != null) {
+            //右兄弟空位超过一半，则与右兄弟合并，否则从右兄弟窃取
             BTreeLeafPage rightSibling = (BTreeLeafPage) getPage(tid, dirtypages, rightSiblingId, Permissions.READ_WRITE);
             if(rightSibling.getNumEmptySlots() >= maxEmptySlots) {
                 mergeLeafPages(tid, dirtypages, page, rightSibling, parent, rightEntry);
@@ -452,11 +475,14 @@ public class BTreeFile implements DbFile {
             throws DbException, IOException, TransactionAbortedException {
         BTreePageId leftSiblingId = null;
         BTreePageId rightSiblingId = null;
-        if(leftEntry != null) leftSiblingId = leftEntry.getLeftChild();
-        if(rightEntry != null) rightSiblingId = rightEntry.getRightChild();
+        if(leftEntry != null)
+            leftSiblingId = leftEntry.getLeftChild();
+        if(rightEntry != null)
+            rightSiblingId = rightEntry.getRightChild();
 
         int maxEmptySlots = page.getMaxEntries() - page.getMaxEntries()/2; // ceiling
         if(leftSiblingId != null) {
+            //左兄弟空位超过一半，则与左兄弟合并，否则从左兄弟窃取
             BTreeInternalPage leftSibling = (BTreeInternalPage) getPage(tid, dirtypages, leftSiblingId, Permissions.READ_WRITE);
             if(leftSibling.getNumEmptySlots() >= maxEmptySlots) {
                 mergeInternalPages(tid, dirtypages, leftSibling, page, parent, leftEntry);
@@ -466,6 +492,7 @@ public class BTreeFile implements DbFile {
             }
         }
         else if(rightSiblingId != null) {
+            //右兄弟空位超过一半，则与右兄弟合并，否则从右兄弟窃取
             BTreeInternalPage rightSibling = (BTreeInternalPage) getPage(tid, dirtypages, rightSiblingId, Permissions.READ_WRITE);
             if(rightSibling.getNumEmptySlots() >= maxEmptySlots) {
                 mergeInternalPages(tid, dirtypages, page, rightSibling, parent, rightEntry);
@@ -477,7 +504,7 @@ public class BTreeFile implements DbFile {
     }
 
     private void stealFromLeafPage(BTreeLeafPage page, BTreeLeafPage sibling, BTreeInternalPage parent, BTreeEntry entry, boolean isRightSibling) throws DbException {
-        //1. 获取要窃取的tuple个数
+        //1. 获取要窃取的tuple个数，平均数量-原来数量
         int stealNum = ((page.getNumTuples()+sibling.getNumTuples())/2) - page.getNumTuples();
         if(stealNum<=0){
             return;
@@ -508,7 +535,7 @@ public class BTreeFile implements DbFile {
 
     private void stealFromLeftInternalPage(TransactionId tid, Map<PageId, Page> dirtypages, BTreeInternalPage page, BTreeInternalPage leftSibling, BTreeInternalPage parent, BTreeEntry parentEntry)
             throws DbException, TransactionAbortedException {
-        //1. 获取要窃取的tuple个数
+        //1. 获取要窃取的tuple个数，平均数量-原来数量
         int stealNum = (page.getNumEntries()+leftSibling.getNumEntries())/2 - page.getNumEntries();
         if(stealNum<=0){
             return;
@@ -547,7 +574,7 @@ public class BTreeFile implements DbFile {
 
     private void stealFromRightInternalPage(TransactionId tid, Map<PageId, Page> dirtypages, BTreeInternalPage page, BTreeInternalPage rightSibling, BTreeInternalPage parent, BTreeEntry parentEntry)
             throws DbException, TransactionAbortedException {
-        //1. 获取要窃取的tuple个数
+        //1. 获取要窃取的tuple个数，平均数量-原来数量
         int stealNum = (page.getNumEntries()+rightSibling.getNumEntries())/2 - page.getNumEntries();
         if(stealNum<=0){
             return;
@@ -643,8 +670,9 @@ public class BTreeFile implements DbFile {
     private void deleteParentEntry(TransactionId tid, Map<PageId, Page> dirtypages, BTreePage leftPage, BTreeInternalPage parent, BTreeEntry parentEntry)
             throws DbException, IOException, TransactionAbortedException {
         parent.deleteKeyAndRightChild(parentEntry);
-        int maxEmptySlots = parent.getMaxEntries() - parent.getMaxEntries()/2; // ceiling
+        int maxEmptySlots = (parent.getMaxEntries() +1)/2;
         if(parent.getNumEmptySlots() == parent.getMaxEntries()) {
+            //parent全部为空，说明parent是根节点（parent无兄弟节点，在空位超过一半时不处理），删除根节点，左节点成为新的根节点
             BTreePageId rootPtrId = parent.getParentId();
             if(rootPtrId.getPageCategory() != BTreePageId.ROOT_PTR) {
                 throw new DbException("attempting to delete a non-root node");
@@ -652,10 +680,9 @@ public class BTreeFile implements DbFile {
             BTreeRootPtrPage rootPtr = (BTreeRootPtrPage) getPage(tid, dirtypages, rootPtrId, Permissions.READ_WRITE);
             leftPage.setParentId(rootPtrId);
             rootPtr.setRootId(leftPage.getId());
-
             setEmptyPage(tid, dirtypages, parent.getId().getPageNumber());
-        }
-        else if(parent.getNumEmptySlots() > maxEmptySlots) {
+        } else if(parent.getNumEmptySlots() > maxEmptySlots) {
+            //parent空位超过一半
             handleMinOccupancyPage(tid, dirtypages, parent);
         }
     }
@@ -740,15 +767,16 @@ public class BTreeFile implements DbFile {
         BTreePageId prevId = null;
         int headerPageCount = 0;
 
+        //如果第一个headerPage为空，新建headerPage
         if(headerId == null) {
             rootPtr = (BTreeRootPtrPage) getPage(tid, dirtypages, BTreeRootPtrPage.getId(tableid), Permissions.READ_WRITE);
-
             BTreeHeaderPage headerPage = (BTreeHeaderPage) getEmptyPage(tid, dirtypages, BTreePageId.HEADER);
             headerId = headerPage.getId();
             headerPage.init();
             rootPtr.setHeaderId(headerId);
         }
 
+        //遍历链表，计算emptyPageNo所在headerPage
         while(headerId != null && (headerPageCount + 1) * BTreeHeaderPage.getNumSlots() < emptyPageNo) {
             BTreeHeaderPage headerPage = (BTreeHeaderPage) getPage(tid, dirtypages, headerId, Permissions.READ_ONLY);
             prevId = headerId;
@@ -756,20 +784,19 @@ public class BTreeFile implements DbFile {
             headerPageCount++;
         }
 
+        //如果遍历到emptyPageNo所在headerPage前为空，新建headerPage添加到链表末尾
         while((headerPageCount + 1) * BTreeHeaderPage.getNumSlots() < emptyPageNo) {
             BTreeHeaderPage prevPage = (BTreeHeaderPage) getPage(tid, dirtypages, prevId, Permissions.READ_WRITE);
-
             BTreeHeaderPage headerPage = (BTreeHeaderPage) getEmptyPage(tid, dirtypages, BTreePageId.HEADER);
             headerId = headerPage.getId();
             headerPage.init();
             headerPage.setPrevPageId(prevId);
             prevPage.setNextPageId(headerId);
-
             headerPageCount++;
             prevId = headerId;
         }
 
-
+        //将emptyPageNo插槽设置为空
         BTreeHeaderPage headerPage = (BTreeHeaderPage) getPage(tid, dirtypages, headerId, Permissions.READ_WRITE);
         int emptySlot = emptyPageNo - headerPageCount * BTreeHeaderPage.getNumSlots();
         headerPage.markSlotUsed(emptySlot, false);
@@ -878,8 +905,7 @@ class BTreeSearchIterator implements DbFileIterator {
         BTreeRootPtrPage rootPtr = (BTreeRootPtrPage) Database.getBufferPool().getPage(
                 tid, BTreeRootPtrPage.getId(f.getId()), Permissions.READ_ONLY);
         BTreePageId root = rootPtr.getRootId();
-        if(ipred.getOp() == Predicate.Op.EQUALS || ipred.getOp() == Predicate.Op.GREATER_THAN
-                || ipred.getOp() == Predicate.Op.GREATER_THAN_OR_EQ) {
+        if(ipred.getOp() == Predicate.Op.EQUALS || ipred.getOp() == Predicate.Op.GREATER_THAN || ipred.getOp() == Predicate.Op.GREATER_THAN_OR_EQ) {
             curp = f.findLeafPage(tid, root, ipred.getField());
         }
         else {
@@ -889,10 +915,8 @@ class BTreeSearchIterator implements DbFileIterator {
     }
 
 
-    public Tuple readNext() throws TransactionAbortedException, DbException,
-            NoSuchElementException {
+    public Tuple readNext() throws TransactionAbortedException, DbException, NoSuchElementException {
         while (it != null) {
-
             while (it.hasNext()) {
                 Tuple t = it.next();
                 if (t.getField(f.keyField()).compare(ipred.getOp(), ipred.getField())) {

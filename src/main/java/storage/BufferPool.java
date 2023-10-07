@@ -119,6 +119,8 @@ public class BufferPool {
         DbFile dbFile = Database.getCatalog().getDatabaseFile(tableId);
         List<Page> pages = dbFile.insertTuple(tid, t);
         for(Page page : pages){
+            Database.getLogFile().logWrite(tid,page);
+            Database.getLogFile().force();
             page.markDirty(true,tid);
             buffer.put(page.getId(),page);
         }
@@ -129,12 +131,14 @@ public class BufferPool {
         DbFile dbFile = Database.getCatalog().getDatabaseFile(t.getRecordId().getPageId().getTableId());
         List<Page> pages = dbFile.deleteTuple(tid,t);
         for(Page page: pages){
+            Database.getLogFile().logWrite(tid,page);
+            Database.getLogFile().force();
             page.markDirty(true,tid);
         }
     }
 
     /**
-     * 提交事务
+     * 提交或回滚事务
      * @param tid
      */
     public void transactionComplete(TransactionId tid) {
@@ -172,11 +176,8 @@ public class BufferPool {
             if(page!=null && page.isDirty()!=null&&page.isDirty().equals(tid) ){
                 DbFile dbFile = Database.getCatalog().getDatabaseFile(page.getId().getTableId());
                 try{
-                    Database.getLogFile().logWrite(page.isDirty(),page.getBeforeImage(),page);
-                    Database.getLogFile().force();
                     page.markDirty(false,null);
                     dbFile.writePage(page);
-                    page.setBeforeImage();
                 }catch (IOException e){
                     e.printStackTrace();
                 }
@@ -197,6 +198,7 @@ public class BufferPool {
             LRUCache<PageId, Page>.Node next = head.next;
             if(page!=null && page.isDirty()!=null && page.isDirty().equals(tid)){
                 buffer.remove(head);
+                //从磁盘中重新读取页面
                 Page page1 = null;
                 try {
                     page1 = Database.getBufferPool().getPage(tid, page.getId(), Permissions.READ_ONLY);
@@ -222,9 +224,7 @@ public class BufferPool {
             if(page!=null && page.isDirty()!=null){
                 DbFile dbFile = Database.getCatalog().getDatabaseFile(page.getId().getTableId());
                 try{
-                    Database.getLogFile().logWrite(page.isDirty(),page.getBeforeImage(),page);
-                    Database.getLogFile().force();
-
+                    page.markDirty(false,null);
                     dbFile.writePage(page);
                 }catch (IOException e){
                     e.printStackTrace();

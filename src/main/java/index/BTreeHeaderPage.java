@@ -26,7 +26,6 @@ public class BTreeHeaderPage implements Page {
     private int nextPage; // 下一个header page的pageNumber，如果是最后一个，就是0
     private int prevPage; // 上一个header page的pageNumber，如果是第一个，就是0
 
-    private byte[] oldData;//存储旧的数据
 
     public BTreeHeaderPage(BTreePageId id, byte[] data) throws IOException {
         this.pid = id;
@@ -53,7 +52,7 @@ public class BTreeHeaderPage implements Page {
 
         dis.close();
 
-        setBeforeImage();
+
     }
 
     public void init() {
@@ -72,27 +71,6 @@ public class BTreeHeaderPage implements Page {
     }
 
 
-    public BTreeHeaderPage getBeforeImage(){
-        try {
-            byte[] oldDataRef = null;
-            synchronized(this)
-            {
-                oldDataRef = oldData;
-            }
-            return new BTreeHeaderPage(pid,oldDataRef);
-        } catch (IOException e) {
-            e.printStackTrace();
-            System.exit(1);
-        }
-        return null;
-    }
-
-    public void setBeforeImage() {
-        synchronized(this)
-        {
-            oldData = getPageData().clone();
-        }
-    }
 
     public BTreePageId getId() {
         return pid;
@@ -138,7 +116,7 @@ public class BTreeHeaderPage implements Page {
 
     public static byte[] createEmptyPageData() {
         int len = BufferPool.getPageSize();
-        return new byte[len]; //all 0
+        return new byte[len];
     }
 
     public BTreePageId getPrevPageId() {

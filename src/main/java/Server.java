@@ -25,7 +25,7 @@ public class Server {
     private Transaction currentTransaction = null;//当前事务
 
     public static void main (String[] args) throws IOException {
-
+        //todo
 
 
 
@@ -198,6 +198,7 @@ public class Server {
     }
 
     private Query handleUpdateStatement(ZUpdate s, TransactionId tid){
+        //todo
         return null;
     }
 

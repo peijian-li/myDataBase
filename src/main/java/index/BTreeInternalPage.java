@@ -58,7 +58,6 @@ public class BTreeInternalPage extends BTreePage{
         }
         dis.close();
 
-        setBeforeImage();
     }
 
     public int getMaxEntries() {
@@ -143,28 +142,6 @@ public class BTreeInternalPage extends BTreePage{
         return numSlots - getNumEmptySlots() - 1;
     }
 
-    public BTreeInternalPage getBeforeImage(){
-        try {
-            byte[] oldDataRef = null;
-            synchronized(this)
-            {
-                oldDataRef = oldData;
-            }
-            return new BTreeInternalPage(pid,oldDataRef,keyField);
-        } catch (IOException e) {
-            e.printStackTrace();
-            //should never happen -- we parsed it OK before!
-            System.exit(1);
-        }
-        return null;
-    }
-
-    public void setBeforeImage() {
-        synchronized(this)
-        {
-            oldData = getPageData().clone();
-        }
-    }
 
     public byte[] getPageData() {
         int len = BufferPool.getPageSize();

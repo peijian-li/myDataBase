@@ -18,7 +18,7 @@ public class BTreeRootPtrPage implements Page {
     private int rootCategory;  //保存当前根节点的类型，INTERNAL或LEAF，当只有一个节点时，就是LEAF
     private int header;  //保存当前header页的pageNumber
 
-    private byte[] oldData;  //存储旧的数据
+
 
     public BTreeRootPtrPage(BTreePageId id, byte[] data) throws IOException {
         this.pid = id;
@@ -26,12 +26,10 @@ public class BTreeRootPtrPage implements Page {
         root = dis.readInt();
         rootCategory = dis.readByte();
         header = dis.readInt();
-        setBeforeImage();
+
     }
 
-    public void setBeforeImage() {
-        oldData = getPageData().clone();
-    }
+
 
     public BTreePageId getId() {
         return pid;
@@ -81,15 +79,7 @@ public class BTreeRootPtrPage implements Page {
             return null;
     }
 
-    public BTreeRootPtrPage getBeforeImage(){
-        try {
-            return new BTreeRootPtrPage(pid,oldData);
-        } catch (IOException e) {
-            e.printStackTrace();
-            System.exit(1);
-        }
-        return null;
-    }
+
 
     public static BTreePageId getId(int tableId) {
         return new BTreePageId(tableId, 0, BTreePageId.ROOT_PTR);
